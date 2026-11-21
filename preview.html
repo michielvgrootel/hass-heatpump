@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heatpump Card Preview</title>
+<style>
+  :root {
+    --primary-text-color: #1c2333; --secondary-text-color: #6b7487;
+    --card-background-color: #ffffff; --ha-card-background: #ffffff; 
+  }
+  body.dark {
+    --primary-text-color: #e6e9f0; --secondary-text-color: #9aa3b5;
+    --card-background-color: #1c2027; --ha-card-background: #1c2027;
+    background: #111418;
+  }
+  body { margin: 0; font-family: Roboto, system-ui, sans-serif; background: #eef1f6; padding: 24px 16px; }
+  .wrap { max-width: 520px; margin: 0 auto; }
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .controls button { border: 0; border-radius: 999px; padding: 6px 12px; cursor: pointer; background: #fff; color: #333; font: inherit; font-size: 13px; }
+  .controls button.sel { background: #ff8a3d; color: #fff; }
+  .ed { margin-top: 16px; background: #fff; border-radius: 14px; padding: 10px 14px; font-size: 13px; }
+  .ed summary { cursor: pointer; font-weight: 600; }
+  .ed fieldset { border: 1px solid #e3e7ee; border-radius: 10px; margin: 8px 0; }
+  .ed label { display: grid; grid-template-columns: 170px 1fr; gap: 8px; align-items: center; margin: 4px 0; }
+  .ed small { color: #8a93a6; grid-column: 2; margin-top: -4px; }
+  .ed input[type=text], .ed input[type=number] { padding: 4px 6px; border: 1px solid #d5dbe5; border-radius: 6px; font: inherit; }
+  .ed pre { background: #f4f6fa; padding: 8px; border-radius: 8px; font-size: 11px; white-space: pre-wrap; }
+  ha-card { display: block; border-radius: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.08); color: var(--primary-text-color); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="controls" id="controls"></div>
+  <heatpump-card id="card"></heatpump-card>
+  <details class="ed" open><summary>Editor (test shim of ha-form)</summary><div id="editorHost"></div><pre id="yaml"></pre></details>
+</div>
+<script>
+  // --- shims for HA elements ---
+  customElements.define("ha-card", class extends HTMLElement {});
+  // minimal ha-form stand-in: renders the schema as plain inputs and fires value-changed like HA does
+  customElements.define("ha-form", class extends HTMLElement {
+    set data(d) { this._data = d; this._r(); }
+    set schema(s) { this._schema = s; this._r(); }
+    set hass(h) {}
+    _r() {
+      if (!this._schema || !this._data || !this.computeLabel) return queueMicrotask(() => this._schema && this._data && this.computeLabel && this._r());
+      const field = (f) => {
+        if (f.schema) {
+          const fs = document.createElement("fieldset");
+          if (f.type === "expandable") fs.innerHTML = `<legend>${this.computeLabel(f)}</legend>`;
+          f.schema.forEach((x) => fs.append(field(x)));
+          return fs;
+        }
+        const lab = document.createElement("label");
+        const sel = f.selector || {};
+        const type = sel.boolean ? "checkbox" : sel.number ? "number" : "text";
+        lab.innerHTML = `<span>${this.computeLabel(f)}</span><input type="${type}" name="${f.name}">${this.computeHelper?.(f) ? `<small>${this.computeHelper(f)}</small>` : ""}`;
+        const inp = lab.querySelector("input");
+        if (type === "checkbox") inp.checked = !!this._data[f.name]; else inp.value = this._data[f.name] ?? "";
+        if (sel.entity) inp.placeholder = "sensor.…";
+        inp.addEventListener("change", () => {
+          const v = type === "checkbox" ? inp.checked : type === "number" ? Number(inp.value) : inp.value;
+          this._data = { ...this._data, [f.name]: v };
+          this.dispatchEvent(new CustomEvent("value-changed", { detail: { value: this._data } }));
+        });
+        return lab;
+      };
+      this.replaceChildren(...this._schema.map(field));
+    }
+  });
+  customElements.define("ha-icon", class extends HTMLElement {
+    static get observedAttributes() { return ["icon"]; }
+    connectedCallback() { this._r(); }
+    attributeChangedCallback() { this._r(); }
+    _r() {
+      if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+      const n = (this.getAttribute("icon") || "").replace("mdi:", "");
+      this.shadowRoot.innerHTML = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css">
+        <style>:host{display:inline-flex;line-height:1} i{font-size:var(--mdc-icon-size,24px)}</style><i class="mdi mdi-${n}"></i>`;
+    }
+  });
+</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css">
+<script>document.write(`<script src="heatpump-card.js?v=${Date.now()}"><\/script>`)</script>
+<script>
+  const S = (id, state, unit, attrs = {}) => ({ entity_id: id, state: String(state), attributes: { unit_of_measurement: unit, ...attrs } });
+  const scenarios = {
+    Warmwater: { status: "Warmwater", out: 10.5, sup: 37.1, ret: 30.4, dhw: 37.1, flow: 22.5, p: 1.8, pin: 990, pout: 7.41, dhwd: "on", defr: "off", boost: 0 },
+    Verwarmen: { status: "Verwarmen", out: 4.2, sup: 30.0, ret: 26.1, dhw: 48.2, flow: 18.0, p: 1.7, pin: 640, pout: 2.9, dhwd: "off", defr: "off", boost: 0 },
+    Koelen: { status: "Koelen", out: 28.4, sup: 18.0, ret: 21.6, dhw: 47.5, flow: 19.0, p: 1.8, pin: 520, pout: 2.3, dhwd: "off", defr: "off", boost: 0 },
+    Ontdooien: { status: "Ontdooien", out: -1.5, sup: 22.0, ret: 24.3, dhw: 46.0, flow: 15.0, p: 1.6, pin: 420, pout: 0, dhwd: "off", defr: "on", boost: 0 },
+    Booster: { status: "Warmwater", out: -6, sup: 52, ret: 44, dhw: 50.2, flow: 20, p: 1.9, pin: 3200, pout: 9.1, dhwd: "on", defr: "off", boost: 2000 },
+    Uit: { status: "Uit", out: 12.0, sup: 22.1, ret: 21.8, dhw: 46.4, flow: 0, p: 0.9, pin: 8, pout: 0, dhwd: "off", defr: "off", boost: 0 },
+  };
+  function makeHass(sc) {
+    const states = {};
+    const add = (s) => (states[s.entity_id] = s);
+    add(S("sensor.hp_status", sc.status));
+    add(S("sensor.hp_outside", sc.out, "°C", { friendly_name: "Buitentemperatuur" }));
+    add(S("sensor.hp_outlet", sc.sup, "°C"));
+    add(S("sensor.hp_inlet", sc.ret, "°C"));
+    add(S("sensor.hp_dhw", sc.dhw, "°C"));
+    add(S("water_heater.hp_dhw", "heat_pump", undefined, { temperature: 47, current_temperature: sc.dhw }));
+    add(S("sensor.hp_flow", sc.flow, "L/min"));
+    add(S("sensor.hp_pressure", sc.p, "bar"));
+    add(S("sensor.hp_power", sc.pin, "W"));
+    add(S("sensor.hp_heat", sc.pout, "kW"));
+    add(S("binary_sensor.hp_dhw_demand", sc.dhwd));
+    add(S("binary_sensor.hp_defrost", sc.defr));
+    add(S("sensor.hp_booster", sc.boost, "W"));
+    add(S("sensor.floor", 30.0, "°C"));
+    add(S("sensor.hp_cop_daily", 4.1, ""));
+    add(S("sensor.room", 20.8, "°C"));
+    return {
+      states, language: "nl", locale: { language: "nl" },
+      callWS: async (msg) => {
+        const t0 = Date.parse(msg.start_time) / 1000, t1 = Date.now() / 1000, out = {};
+        const gen = (fn) => { const a = []; for (let t = t0; t <= t1; t += 600) { const h = new Date(t * 1000).getHours() + new Date(t * 1000).getMinutes() / 60; a.push({ s: String(fn(h).toFixed(1)), lu: t }); } return a; };
+        const on = (h) => (h > 7 && h < 13.5) || (h > 16.5 && h < 17.2);
+        const dhw = (h) => (h > 8 && h < 8.6) || (h > 16.4 && h < 17);
+        out["sensor.hp_outlet"] = gen((h) => dhw(h) ? 52 : on(h) ? 30 + Math.sin(h) * 2 : 22);
+        out["sensor.hp_inlet"] = gen((h) => dhw(h) ? 44 : on(h) ? 26 + Math.sin(h) * 2 : 21);
+        out["sensor.hp_dhw"] = gen((h) => 47 - ((h + 24 - 17) % 24) * 0.5 + (h > 8 && h < 8.6 ? 5 : 0));
+        out["sensor.hp_outside"] = gen((h) => 3 + 7 * Math.sin(((h - 9) / 24) * 2 * Math.PI));
+        out["sensor.hp_power"] = gen((h) => dhw(h) ? 3000 : on(h) ? 800 + Math.random() * 500 : 0);
+        return out;
+      },
+    };
+  }
+  const card = document.getElementById("card");
+  const startConfig = {
+    title: "Warmtepomp",
+    entities: {
+      status: "sensor.hp_status", outside_temp: "sensor.hp_outside", flow_temp: "sensor.hp_outlet", return_temp: "sensor.hp_inlet",
+      dhw_temp: "sensor.hp_dhw", dhw_target: "water_heater.hp_dhw", flow_rate: "sensor.hp_flow", pressure: "sensor.hp_pressure",
+      power_in: "sensor.hp_power", power_out: "sensor.hp_heat", dhw_demand: "binary_sensor.hp_dhw_demand",
+      defrost: "binary_sensor.hp_defrost", booster: "sensor.hp_booster", room_temp: "sensor.room",
+    },
+  };
+  card.setConfig(startConfig);
+  // editor wiring, like the HA card editor dialog does
+  const editor = document.createElement("heatpump-card-editor");
+  editor.setConfig(startConfig);
+  document.getElementById("editorHost").append(editor);
+
+  const showCfg = (c) => (document.getElementById("yaml").textContent = JSON.stringify(c, null, 2));
+  editor.addEventListener("config-changed", (e) => { card.setConfig(e.detail.config); card.hass = card._hass; showCfg(e.detail.config); });
+  const ctl = document.getElementById("controls");
+  const set = (name) => {
+    card.hass = makeHass(scenarios[name]);
+    editor.hass = card._hass;
+    [...ctl.children].forEach((b) => b.classList.toggle("sel", b.textContent === name));
+  };
+  Object.keys(scenarios).forEach((n) => { const b = document.createElement("button"); b.textContent = n; b.onclick = () => set(n); ctl.append(b); });
+  const d = document.createElement("button"); d.textContent = "🌙 Dark"; d.onclick = () => document.body.classList.toggle("dark"); ctl.append(d);
+  set(new URLSearchParams(location.search).get("s") || "Warmwater");
+  card.addEventListener("hass-more-info", (e) => console.log("more-info", e.detail.entityId));
+</script>
+</body>
+</html>
